@@ -80,10 +80,15 @@ end
 
 local function aimAt(part)
 	if not part then return end
-	local cur = Cam.CFrame
-	local dir = (part.Position - cur.Position).Unit
-	local newLook = cur.LookVector:Lerp(dir, AIM_LERP)
-	Cam.CFrame = CFrame.new(cur.Position, cur.Position + newLook)
+	local cur = Cam.CFrame.Position
+	local goal = part.Position
+	if AIM_LERP >= 1 then
+		Cam.CFrame = CFrame.new(cur, goal)
+	else
+		local newLook = (goal - cur).Unit
+		local lerped = Cam.CFrame.LookVector:Lerp(newLook, AIM_LERP)
+		Cam.CFrame = CFrame.new(cur, cur + lerped)
+	end
 end
 
 do
