@@ -1,0 +1,177 @@
+local fov = 135
+local GROUND_OFFSET = 2
+local NPC_UPDATE_INTERVAL = 0.7
+local AIM_LERP = 0.6
+
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local Players = game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
+local Cam = workspace.CurrentCamera
+
+local FOVring = Drawing.new("Circle")
+FOVring.Visible = false
+FOVring.Thickness = 2
+FOVring.Color = Color3.fromRGB(128, 0, 128)
+FOVring.Filled = false
+FOVring.Radius = fov
+FOVring.Position = Cam.ViewportSize/2
+
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Parent = game:GetService("CoreGui")
+
+local ToggleButton = Instance.new("TextButton")
+ToggleButton.Size = UDim2.new(0, 120, 0, 40)
+ToggleButton.Position = UDim2.new(0, 10, 0, 10)
+ToggleButton.Text = "AIMBOT: OFF"
+ToggleButton.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+ToggleButton.TextColor3 = Color3.fromRGB(255, 50, 50)
+ToggleButton.Font = Enum.Font.GothamBold
+ToggleButton.TextSize = 14
+ToggleButton.Parent = ScreenGui
+
+local isAiming = false
+local validNPCs = {}
+local raycastParams = RaycastParams.new()
+raycastParams.FilterType = Enum.RaycastFilterType.Blacklist
+raycastParams.IgnoreWater = true
+
+local function isNPC(model)
+    if not model or not model:IsA("Model") then return false end
+    local humanoid = model:FindFirstChildOfClass("Humanoid")
+    if not humanoid or humanoid.Health <= 0 then return false end
+    if not model:FindFirstChild("HumanoidRootPart") then return false end
+    if Players:GetPlayerFromCharacter(model) then return false end
+    return true
+end
+
+local function updateNPCs()
+    local t = {}
+    for _, obj in ipairs(workspace:GetDescendants()) do
+        if isNPC(obj) then
+            table.insert(t, obj)
+        end
+    end
+    validNPCs = t
+end
+
+local function getFeetMidpoint(npc)
+    local humanoid = npc:FindFirstChildOfClass("Humanoid")
+    local left, right
+    if humanoid then
+        if humanoid.RigType == Enum.HumanoidRigType.R15 then
+            left = npc:FindFirstChild("LeftFoot")
+            right = npc:FindFirstChild("RightFoot")
+        else
+            left = npc:FindFirstChild("Left Leg") or npc:FindFirstChild("LeftLeg")
+            right = npc:FindFirstChild("Right Leg") or npc:FindFirstChild("RightLeg")
+        end
+    end
+    if (not left or not right) then
+        for _, part in ipairs(npc:GetChildren()) do
+            if part:IsA("BasePart") then
+                local n = part.Name:lower()
+                if not left and n:find("left") and (n:find("foot") or n:find("leg")) then left = part end
+                if not right and n:find("right") and (n:find("foot") or n:find("leg")) then right = part end
+            end
+        end
+    end
+    if left and right then
+        local mid = (left.Position + right.Position) * 0.5
+        return mid + Vector3.new(0, -GROUND_OFFSET, 0)
+    end
+end
+
+local function canSee(npc)
+    local aimPart = npc:FindFirstChild("Head") or npc:FindFirstChild("HumanoidRootPart")
+    if not aimPart then return false end
+    raycastParams.FilterDescendantsInstances = { LocalPlayer.Character }
+    local dir = aimPart.Position - Cam.CFrame.Position
+    local ray = workspace:Raycast(Cam.CFrame.Position, dir, raycastParams)
+    if not ray then return true end
+    return ray.Instance and ray.Instance:IsDescendantOf(npc)
+end
+
+local function getTarget()
+    local best, bestDist
+    bestDist = math.huge
+    local center = Cam.ViewportSize * 0.5
+    for _, npc in ipairs(validNPCs) do
+        local feet = getFeetMidpoint(npc)
+        local pos, visible, z
+        if feet then
+            pos, visible, z = Cam:WorldToViewportPoint(feet)
+        else
+            local head = npc:FindFirstChild("Head") or npc:FindFirstChild("HumanoidRootPart")
+            if head then
+                pos, visible, z = Cam:WorldToViewportPoint(head.Position)
+            end
+        end
+        if visible and z > 0 then
+            local dist = (Vector2.new(pos.X, pos.Y) - center).Magnitude
+            if dist <= fov and canSee(npc) and dist < bestDist then
+                bestDist = dist
+                best = feet or npc:FindFirstChild("HumanoidRootPart").Position
+            end
+        end
+    end
+    return best
+end
+
+local function aimAt(pos)
+    if not pos then return end
+    local cur = Cam.CFrame
+    local dir = (pos - cur.Position).Unit
+    local newLook = cur.LookVector:Lerp(dir, AIM_LERP)
+    Cam.CFrame = CFrame.new(cur.Position, cur.Position + newLook)
+end
+
+do
+    local accum = 0
+    updateNPCs()
+    RunService.Heartbeat:Connect(function(dt)
+        FOVring.Position = Cam.ViewportSize/2
+        FOVring.Radius = fov
+        accum = accum + dt
+        if accum >= NPC_UPDATE_INTERVAL then
+            updateNPCs()
+            accum = 0
+        end
+        if isAiming then
+            local pos = getTarget()
+            if pos then aimAt(pos) end
+        end
+    end)
+end
+
+ToggleButton.MouseButton1Click:Connect(function()
+    isAiming = not isAiming
+    FOVring.Visible = isAiming
+    ToggleButton.Text = "AIMBOT: " .. (isAiming and "ON" or "OFF")
+    ToggleButton.TextColor3 = isAiming and Color3.fromRGB(50,255,50) or Color3.fromRGB(255,50,50)
+end)
+
+do
+    local dragging, dragInput, startPos, dragStart
+    local function updateDrag(input)
+        local delta = input.Position - dragStart
+        ToggleButton.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+    end
+    ToggleButton.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            dragInput = input
+            dragStart = input.Position
+            startPos = ToggleButton.Position
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then dragging = false end
+            end)
+        end
+    end)
+    ToggleButton.InputChanged:Connect(function(input)
+        if input == dragInput and dragging then updateDrag(input) end
+    end)
+    UserInputService.InputChanged:Connect(function(input)
+        if input == dragInput and dragging then updateDrag(input) end
+    end)
+end
