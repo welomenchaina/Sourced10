@@ -5,7 +5,7 @@ local Humanoid = Character:WaitForChild("Humanoid")
 local RunService = game:GetService("RunService")
 
 local Usernames = {
-    "RizzardOfTheEast",
+    "RizzardOfTheSouth",
     "Roblox",
     "Nobody"
 }
